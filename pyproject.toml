@@ -26,7 +26,7 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/yxgao/tensordict-cache"
+Repository = "https://github.com/yuxiang-gao/tensordict-cache"
 
 [dependency-groups]
 dev = [
