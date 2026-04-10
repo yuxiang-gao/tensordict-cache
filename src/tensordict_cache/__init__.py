@@ -35,6 +35,15 @@ def _load_cache_from_disk(prefix: str) -> TensorDict:
     return cache
 
 
+def _get_dir_size(path: str) -> int:
+    """Return total file size in bytes under a directory, recursively."""
+    total = 0
+    for dirpath, _dirnames, filenames in os.walk(path):
+        for f in filenames:
+            total += os.path.getsize(os.path.join(dirpath, f))
+    return total
+
+
 def format_big_number(num, precision=0):
     suffixes = ["", "K", "M", "B", "T", "Q"]
     divisor = 1000.0
@@ -56,7 +65,12 @@ class TensorCache:
     and loading each with :meth:`TensorDict.load_memmap`.
     """
 
-    def __init__(self, prefix: str | os.PathLike, load_existing: bool = True):
+    def __init__(
+        self,
+        prefix: str | os.PathLike,
+        load_existing: bool = True,
+        max_size_bytes: int | None = None,
+    ):
         """Create or open an online cache under ``prefix``.
 
         Args:
@@ -64,8 +78,12 @@ class TensorCache:
                 subdirectory. Created if it does not exist.
             load_existing: If True, discover existing subdirs under ``prefix``
                 and load each via :meth:`TensorDict.load_memmap`.
+            max_size_bytes: Maximum total cache size in bytes. When exceeded,
+                the oldest entries (by directory mtime) are evicted. If None,
+                the cache grows without limit.
         """
         self._prefix = os.fspath(prefix)
+        self._max_size_bytes = max_size_bytes
         os.makedirs(self._prefix, exist_ok=True)
         if load_existing:
             self._cache = _load_cache_from_disk(self._prefix)
@@ -87,6 +105,7 @@ class TensorCache:
         os.makedirs(subdir, exist_ok=True)
         mm_td = value.memmap(subdir, robust_key=True)
         self._cache[base] = mm_td
+        self._evict_if_needed()
 
     def __getitem__(self, key: str | int) -> TensorDict:
         """Return the cached TensorDict for ``key``."""
@@ -94,6 +113,20 @@ class TensorCache:
         if base not in self._cache.keys():
             raise KeyError(key)
         return self._cache[base]
+
+    def __delitem__(self, key: str | int) -> None:
+        """Remove the cached entry for ``key`` from memory and disk.
+
+        Raises:
+            KeyError: If ``key`` is not in the cache.
+        """
+        base = _key_to_basename(key)
+        if base not in self._cache.keys():
+            raise KeyError(key)
+        subdir = os.path.join(self._prefix, base)
+        if os.path.isdir(subdir):
+            shutil.rmtree(subdir)
+        del self._cache[base]
 
     def __contains__(self, key: str | int) -> bool:
         """Return whether ``key`` is in the cache."""
@@ -114,6 +147,27 @@ class TensorCache:
         except KeyError:
             return default
 
+    def _evict_if_needed(self) -> None:
+        """Evict oldest entries (by directory mtime) until cache is within size limit."""
+        if self._max_size_bytes is None:
+            return
+        while self.get_cache_size() > self._max_size_bytes and len(self) > 0:
+            oldest_name = None
+            oldest_mtime = float("inf")
+            for name in list(self._cache.keys()):
+                subdir = os.path.join(self._prefix, name)
+                if os.path.isdir(subdir):
+                    mtime = os.path.getmtime(subdir)
+                    if mtime < oldest_mtime:
+                        oldest_mtime = mtime
+                        oldest_name = name
+            if oldest_name is None:
+                break
+            subdir = os.path.join(self._prefix, oldest_name)
+            if os.path.isdir(subdir):
+                shutil.rmtree(subdir)
+            del self._cache[oldest_name]
+
     def clear(self) -> None:
         """Clear the cache and remove all cached subdirectories on disk."""
         for name in list(self._cache.keys()):
@@ -131,8 +185,11 @@ class TensorCache:
         return self.__repr__()
 
     def get_cache_size(self) -> int:
-        """Return the size of the cache in bytes."""
-        return sum(os.path.getsize(os.path.join(self._prefix, key)) for key in self._cache.keys())
+        """Return the total size of the cache in bytes."""
+        return sum(
+            _get_dir_size(os.path.join(self._prefix, name))
+            for name in self._cache.keys()
+        )
 
     def get_cache_size_human(self) -> str:
         """Return the size of the cache in a human-readable format."""
