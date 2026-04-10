@@ -8,3 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+.coverage
+my_cache/
+.claude/settings.local.json
+src/tensordict_cache/_version.py
