@@ -92,6 +92,26 @@ print(cache)
 # TensorCache(prefix=/path/to/cache, n_cache=3)
 ```
 
+### Deleting entries
+
+```python
+# Remove a single entry from memory and disk
+del cache["my_prompt"]
+
+# Raises KeyError if the key doesn't exist
+```
+
+### Size-limited cache
+
+```python
+# Cap total disk usage at 1 GB — oldest entries are evicted first
+cache = TensorCache("./my_cache", max_size_bytes=1_000_000_000)
+
+cache["a"] = TensorDict({"x": torch.randn(768)}, batch_size=[])
+cache["b"] = TensorDict({"x": torch.randn(768)}, batch_size=[])
+# When a new insert exceeds the limit, the oldest entry is removed automatically
+```
+
 ### Clearing the cache
 
 ```python
@@ -137,9 +157,10 @@ low even for large caches.
 
 | Method | Description |
 |---|---|
-| `TensorCache(prefix, load_existing=True)` | Create or open a cache at `prefix` |
+| `TensorCache(prefix, load_existing=True, max_size_bytes=None)` | Create or open a cache at `prefix` |
 | `cache[key] = td` | Store a `TensorDict` under `key` |
 | `cache[key]` | Retrieve a `TensorDict` (raises `KeyError` if missing) |
+| `del cache[key]` | Remove entry from memory and disk (raises `KeyError` if missing) |
 | `cache.get(key, default=None)` | Retrieve or return `default` |
 | `key in cache` | Check if `key` exists |
 | `len(cache)` | Number of cached entries |
